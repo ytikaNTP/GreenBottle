@@ -12,7 +12,7 @@ const PORT = 3000;
 // Конфигурация
 const config = {
   TOKEN: '7857812613:AAGXRbkr5TiJC5z7IxxoPCzw07ZvDNeHjVg',
-  OWNER_CHAT_ID: '6966335427',
+  OWNER_CHAT_IDS: ['6966335427', 'ДОБАВЬТЕ_ДРУГИЕ_ID'], // Массив ID
   UseChatID: true
 };
 
@@ -34,7 +34,7 @@ bot.on('message', (msg) => {
 
 const upload = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: 20 * 1224 * 1224 }
+  limits: { fileSize: 20 * 1024 * 1024 }
 });
 
 const TAGS = {
@@ -46,92 +46,88 @@ const TAGS = {
   save: { emoji: '💾', text: 'Позже' }
 };
 
-async function sendTicket(chatId, data) {
+async function sendTicket(chatIds, data) {
   try {
-    const messages = [];
-    let mainMessage;
+    for (const chatId of chatIds) {
+      const messages = [];
+      let mainMessage;
 
-    // Текст сообщения
-    const messageText = `
-      🎫 Новый тикет от ${data.name}
-      📅 Дата: ${new Date().toLocaleString()}
-      👤 Имя: <code>${data.name}</code>
-      📞 Телефон: <code>${data.phone}</code>
-      📩 Контакт: <code>${data.contact}</code>
-      🔗 Ссылка: <code>${data.product_url}</code>
-      💬 Комментарий: ${data.comment || 'Отсутствует'}
-      
-      ━━━━━━━━━━━━━
-      🏷 Теги: Нет
-    `.replace(/^ +/gm, '');
+      const messageText = `
+        🎫 Новый тикет от ${data.name}
+        📅 Дата: ${new Date().toLocaleString()}
+        👤 Имя: <code>${data.name}</code>
+        📞 Телефон: <code>${data.phone}</code>
+        📩 Контакт: <code>${data.contact}</code>
+        🔗 Ссылка: <code>${data.product_url}</code>
+        💬 Комментарий: ${data.comment || 'Отсутствует'}
+        
+        ━━━━━━━━━━━━━
+        🏷 Теги: Нет
+      `.replace(/^ +/gm, '');
 
-    // Подготовка изображений
-    const media = await Promise.all(
-      data.files.map(async file => ({
-        type: 'photo',
-        media: await sharp(file.buffer)
+      const media = [];
+      for (const file of data.files) {
+        const processed = await sharp(file.buffer)
           .resize(800)
           .jpeg({ quality: 80 })
-          .toBuffer()
-      }))
-    );
+          .toBuffer();
+        media.push({ type: 'photo', media: processed });
+      }
 
-    // Клавиатура с кнопками
-    const keyboard = {
-      inline_keyboard: [
-        [
-          { text: `${TAGS.checked.emoji} Проверено`, callback_data: 'checked' },
-          { text: `${TAGS.rejected.emoji} Отклонено`, callback_data: 'rejected' }
-        ],
-        [
-          { text: `${TAGS.spam.emoji} Спам`, callback_data: 'spam' },
-          { text: `${TAGS.clown.emoji} Клоун`, callback_data: 'clown' },
-          { text: `${TAGS.qwest.emoji} Под вопросом`, callback_data: 'qwest' },
-          { text: `${TAGS.save.emoji} Позже`, callback_data: 'save' }
-        ],
-        [
-          { text: '🗑️ Удалить тикет', callback_data: 'delete' }
+      const keyboard = {
+        inline_keyboard: [
+          [
+            { text: `${TAGS.checked.emoji} Проверено`, callback_data: 'checked' },
+            { text: `${TAGS.rejected.emoji} Отклонено`, callback_data: 'rejected' }
+          ],
+          [
+            { text: `${TAGS.spam.emoji} Спам`, callback_data: 'spam' },
+            { text: `${TAGS.clown.emoji} Клоун`, callback_data: 'clown' },
+            { text: `${TAGS.qwest.emoji} Под вопросом`, callback_data: 'qwest' },
+            { text: `${TAGS.save.emoji} Позже`, callback_data: 'save' }
+          ],
+          [
+            { text: '🗑️ Удалить тикет', callback_data: 'delete' }
+          ]
         ]
-      ]
-    };
+      };
 
-    if (media.length > 0) {
-      // Отправляем медиагруппу с сообщением
-      const sentMedia = await bot.sendMediaGroup(chatId, media);
-      messages.push(...sentMedia.map(m => m.message_id));
-      
-      // Отправляем текст с кнопками
-      mainMessage = await bot.sendMessage(chatId, messageText, {
-        parse_mode: 'HTML',
-        reply_markup: keyboard
-      });
-    } else {
-      // Отправляем только текстовое сообщение
-      mainMessage = await bot.sendMessage(chatId, messageText, {
-        parse_mode: 'HTML',
-        reply_markup: keyboard
+      if (media.length > 0) {
+        const sentMedia = await bot.sendMediaGroup(chatId, media);
+        messages.push(...sentMedia.map(m => m.message_id));
+        mainMessage = await bot.sendMessage(chatId, messageText, {
+          parse_mode: 'HTML',
+          reply_markup: keyboard
+        });
+      } else {
+        mainMessage = await bot.sendMessage(chatId, messageText, {
+          parse_mode: 'HTML',
+          reply_markup: keyboard
+        });
+      }
+
+      messages.push(mainMessage.message_id);
+
+      // Уникальный ключ с chatId и message_id
+      const storageKey = `${chatId}_${mainMessage.message_id}`;
+      storage.set(storageKey, {
+        messages,
+        chatId,
+        tags: new Set()
       });
     }
-
-    messages.push(mainMessage.message_id);
-
-    // Сохраняем в хранилище
-    storage.set(mainMessage.message_id, {
-      messages,
-      chatId,
-      tags: new Set()
-    });
-
   } catch (error) {
     console.error('Ошибка отправки:', error);
   }
 }
 
 app.post('/save', upload.array('images', 7), async (req, res) => {
-  const targetChat = config.UseChatID ? config.OWNER_CHAT_ID : req.body.chatId;
+  const targetChats = config.UseChatID 
+    ? config.OWNER_CHAT_IDS 
+    : [req.body.chatId];
   
   try {
-    await sendTicket(targetChat, {
+    await sendTicket(targetChats, {
       ...req.body,
       files: req.files || [],
       chatId: req.body.chatId
@@ -144,24 +140,23 @@ app.post('/save', upload.array('images', 7), async (req, res) => {
 
 bot.on('callback_query', async (query) => {
   const msg = query.message;
-  const ticket = storage.get(msg.message_id);
+  const storageKey = `${msg.chat.id}_${msg.message_id}`;
+  const ticket = storage.get(storageKey);
 
   if (!ticket) return;
 
   if (query.data === 'delete') {
-    // Удаляем все сообщения тикета
     try {
       await Promise.all(
         ticket.messages.map(messageId => 
           bot.deleteMessage(ticket.chatId, messageId)
         )
       );
-      storage.delete(msg.message_id);
+      storage.delete(storageKey);
     } catch (error) {
       console.error('Ошибка при удалении:', error);
     }
   } else {
-    // Обновляем теги
     const tag = query.data;
     const tags = ticket.tags;
 
@@ -171,12 +166,11 @@ bot.on('callback_query', async (query) => {
       tags.add(tag);
     }
 
-    // Обновляем текст сообщения
     const newText = msg.text.replace(
       /🏷 Теги:[\s\S]*$/,
       `🏷 Теги:\n${
         tags.size > 0 
-          ? Array.from(tags).map(t => `${TAGS[t].emoji} ${TAGS[t].text}`).join('\n') 
+          ? Array.from(tags).map(t => `${TAGS[t].emoji} ${TAGS[t].text}`).join('\n')
           : '...'
       }`
     );
@@ -188,7 +182,7 @@ bot.on('callback_query', async (query) => {
       parse_mode: 'HTML'
     });
 
-    storage.set(msg.message_id, {...ticket, tags});
+    storage.set(storageKey, {...ticket, tags});
   }
 
   bot.answerCallbackQuery(query.id);

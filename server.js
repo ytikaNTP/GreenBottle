@@ -12,7 +12,7 @@ const PORT = 3000;
 // Конфигурация
 const config = {
   TOKEN: '7857812613:AAGXRbkr5TiJC5z7IxxoPCzw07ZvDNeHjVg',
-  OWNER_CHAT_IDS: ['6966335427', 'ДОБАВЬТЕ_ДРУГИЕ_ID'], // Массив ID
+  OWNER_CHAT_IDS: ['6966335427', '7847234018'], // Массив ID
   UseChatID: true
 };
 
